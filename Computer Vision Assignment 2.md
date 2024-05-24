@@ -174,7 +174,7 @@ Test Accuracy of Dataset: 	 39% 	 (1401/3589)
 
 
 
-## Shallow Transformer Replicating paper
+## Shallow Transformer
 
 <img src="/Users/adi/Library/Application Support/typora-user-images/image-20240524191905674.png" alt="image-20240524191905674" style="zoom:100%;" />
 
