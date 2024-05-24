@@ -55,6 +55,8 @@ Class Diftribtion in FER2013, and the challenges asscociated with the dataset ar
 
 ## CNN
 
+* All the experiments and the code are from the notebook : https://github.com/adishourya/VIT_FER2013/blob/main/convolutional.ipynb
+
 ```python
 # define a small convolutional network
 # see beautiful mnist in tinygrad .
@@ -176,13 +178,100 @@ Test Accuracy of Dataset: 	 39% 	 (1401/3589)
 
 ## Shallow Transformer
 
+* we will try to replicate a shallow vit from the paper  adosovitskiy et.al [https://arxiv.org/pdf/2010.11929v2] 
+
 <img src="/Users/adi/Library/Application Support/typora-user-images/image-20240524191905674.png" alt="image-20240524191905674" style="zoom:100%;" />
 
+* All the experiments and the code are from : https://github.com/adishourya/VIT_FER2013/blob/main/fer_vit.ipynb
+
+* we will first start with splitting the image as patches
+
+### generating patches
+
+> To do so, we split an image into patches and provide the sequence of linear embeddings of these patches as an input to a Transformer. Image patches are treated the same way as tokens
+>
+> ​	-- Introduction  adosovitskiy et.al
+
+> Naive application of self-attention to images would require that each pixel attends to every other pixel. 
+>
+> ​		--  Related Work  adosovitskiy et.al
+
+```python
+## from class FerDataset(utils.data.Dataset): (check Notebook fer_vit)
+  def get_patches(self, arr):
+        # best place to use einops
+        # squueze out the channel dimension.. the loader will add it ..
+        arr = einops.rearrange(arr,"1 h w -> h w") 
+        patches = einops.rearrange(
+            arr, "(p1 h) (p2 w) ->(p1 p2) h w",p1=2 , p2=2
+        ) # lay it on as the batch for the image
+        # we need to crop twice for a 48 * 48 image to get a 16 * 16 patch
+        return patches
+
+```
+
+![image-20240525001520248](/Users/adi/Library/Application Support/typora-user-images/image-20240525001520248.png)
+
+### Embed Patches
+
+* We first flatten all the patches and embed them with a lookup table
+
+```python
+# initalize a lookup table
+ self.C = nn.Parameter(torch.randn(self.vocab_size, self.n_embed) * 1/torch.sqrt(self.vocab_size) )
+  
+# flatten the patches
+patches = einops.rearrange(X,"b p h w -> b p (h w)")
+
+# embed them : the block matrix multiplication looks like :
+# B , p_num , 256 @ 256 , 32
+emb = patches @ self.C # B , p_num , n_embed
+# so each patch (a matrix) gets and n_embed dimensional representation (row vector)
+```
 
 
-* Images to 16 * 16 patches
 
-  <img src="/Users/adi/Library/Application Support/typora-user-images/image-20240524191530610.png" alt="image-20240524191530610" style="zoom:100%;" />
+### class token
+
+* we dont actually use the class token in our implemented model. check screenshot of the issue : `` Is the extra class embedding important to predict the results, why not simply use feature maps to predict?`
+* But the pretrained models implement them anyway. So we do it like :
+
+```python
+# its like adding an extra patch . but this patch is learnable
+learnable_patch = torch.randn(1,n_embed)
+# add same learnable patch to all the images in the batch
+learnable_patch = einops.repeat(learnable_patch,"1 n_embed -> 3 1 n_embed")
+print(learnable_patch.shape)
+# prints torch.Size([3, 1, 128]) # batch_size , 1 token , 128 embed dimension
+
+# you actually need all dims except one to be different to pack or concat it
+# in the paper they add it at the first location. (dont really see how it matters if append it at the end instead)
+xb ,ps = einops.pack([learnable_patch,xb],"b * n_embed") # we want to append it on top of patch
+xb.shape
+# prints torch.Size([3, 5, 128]) # batch , tokens , n_embed
+
+# 4 patches from the images , 1 patch from class token
+```
+
+### positional embedding
+
+```python
+# positional embedding
+# the paper says Position embeddings are added to the patch embeddings to retain positional information.
+# We use standard learnable 1D position embeddings, since we have not observed significant performance gains from using more advanced 2D-aware position embeddings
+
+# init a patch embedding
+self.pe = nn.Parameter(torch.randn(1,4,self.n_embed)) # each pach and representation should get positional embedding
+
+# add patch embedding after class token
+emb = emb + self.pe # kind of acts like a bias towards each patches.
+```
+
+### pass through transformer blocks
+
+* We will first start with making self attention blocks. and then concatenate them to get multihead attention (vasawani et.al  2017) .
+* Note multihead attention blocks returns back the same size of representation `n_embed` .
+* unit test for our implementation of self head attention is in the appendix
 
 ```python
 # check appendix for unit test of this class
@@ -237,7 +326,7 @@ class Multihead(nn.Module):
         return torch.cat([head(x) for head in self.multiheads],dim=2)
 ```
 
-
+* And then a transformer block with it
 
 ```python
 # only multihead ->  skip connection -> layernorm
@@ -260,7 +349,10 @@ class TranformerBlock(nn.Module):
         attention = self.norm(attention)
         return attention # B , n_patch , n_embed
         ...
+        
 ```
+
+* So our architecure looks like this : 
 
 ```python
 # most of the comments are pasted verbatim from the paper
@@ -300,9 +392,10 @@ class SmallVIT(nn.Module):
         
         ...
        
-		def forward(self,X):
+    def forward(self,X):
         batch_size = X.shape[0]
-        patches = X.view(-1,4,256) # B , p_num , 16*16
+        # flatten the patches
+        patches = einops.rearrange(X,"b p h w -> b p (h w)")
         # B , p_num , 256 @ 256 , 32
         emb = patches @ self.C # B , p_num , n_embed
         emb = emb + self.pe # kind of acts like a bias towards each patches.
@@ -326,17 +419,69 @@ class SmallVIT(nn.Module):
 
 
         return logits
-
-        
 ```
 
+![image-20240525004554044](/Users/adi/Library/Application Support/typora-user-images/image-20240525004554044.png)
 
+![image-20240525004620165](/Users/adi/Library/Application Support/typora-user-images/image-20240525004620165.png)
 
-![image-20240524201300617](/Users/adi/Library/Application Support/typora-user-images/image-20240524201300617.png)
+```
+Test Accuracy of Classes
 
+Angry	: 12% 	 (61/491)
+Disgust	: 0% 	 (0/55)
+Fear	: 31% 	 (168/528)
+Happy	: 62% 	 (551/879)
+Sad	: 11% 	 (68/594)
+Surprise	: 13% 	 (56/416)
+Neutral	: 10% 	 (64/626)
 
+Test Accuracy of Dataset: 	 26% 	 (968/3589)
+```
+
+* Note how the accuracy of a shallow transformer (significantly higher number of parameters compared to CNN) produces worse result. which is to be expected.
+
+  
 
 ## Pretrained Vision Transformer (perform transfer learning)
+
+* The code and experiments for this section can be found at : https://github.com/adishourya/VIT_FER2013/blob/main/vit_pretrained.ipynb
+* we will be transfer learning from the model : vit_b_16 [https://pytorch.org/vision/main/models/generated/torchvision.models.vit_b_16.html#vit-b-16] and unfreeze the last few layers to perform the training.
+
+```python
+vision_transformer = models.vit_b_16(weights=models.ViT_B_16_Weights.DEFAULT)
+```
+
+```python
+vision_transformer.heads
+
+#Sequential(
+#  (head): Linear(in_features=768, out_features=1000, bias=True)
+#)
+```
+
+### Fine Tune
+
+```python
+# fine-tune with dataset
+
+# change the number of output classes
+vision_transformer.heads = nn.Linear(in_features=256*3, out_features=7, bias=True)
+
+# freeze the parameters except the last linear layer
+#
+# freeze weights
+for p in vision_transformer.parameters():
+    p.requires_grad = False
+
+# unfreeze weights of classification head to train
+for p in vision_transformer.heads.parameters():
+    p.requires_grad = True
+```
+
+* and then train
+
+![image-20240525005716704](/Users/adi/Library/Application Support/typora-user-images/image-20240525005716704.png)
 
 
 
@@ -344,7 +489,7 @@ class SmallVIT(nn.Module):
 
 
 
-![image-20240524201609270](/Users/adi/Library/Application Support/typora-user-images/image-20240524201609270.png)
+![image-20240524201609270](/Users/adi/Library/Application Support/typora-user-images/image-20240524201609270.png
 
 ```
 ## Results for each class
@@ -358,13 +503,23 @@ Neutral	: 54% 	 (344/626)
 Test Accuracy of Dataset: 	 50% 	 (1799/3589)
 ```
 
-
+* Note how its considerably better than shallow transformer that we made
+* It also performs better than our small convolutional network (Note that the CNN has extremely lower number of parameters compared to vit_b16 )
 
 
 
 
 
 ## Remarks
+
+* Discuss nuber of parameters 
+* Discuss difficulty of task at hand
+
+
+
+
+
+
 
 ## Appendix
 
@@ -400,3 +555,8 @@ py_sa = nn.functional.scaled_dot_product_attention(query, key, value)
 
 ```
 
+### importance of class tokens ?
+
+
+
+![image-20240525002329076](/Users/adi/Library/Application Support/typora-user-images/image-20240525002329076.png)
