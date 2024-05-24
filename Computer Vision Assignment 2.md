@@ -66,9 +66,9 @@ import torch.nn.functional as F
 class Net(nn.Module):
     def __init__(self):
         super().__init__()
-        self.conv1 = nn.Conv2d(1, 6, 5) 
+        self.conv1 = nn.Conv2d(1, 6, 5) # input channel 1 , 6 filter banks each of kernels size (5,5)
         self.pool = nn.MaxPool2d(2, 2) # this is not a learnable operaation just performs downsampling
-        self.conv2 = nn.Conv2d(6, 16, 5)
+        self.conv2 = nn.Conv2d(6, 16, 5) # 16 kernels 
         self.fc1 = nn.Linear(16 * 5 * 5, 120)
         self.fc2 = nn.Linear(120, 84)
         self.fc3 = nn.Linear(84, 7) # we have 7 classes 
@@ -86,7 +86,91 @@ class Net(nn.Module):
 net = Net()
 ```
 
-![image-20240524201404417](/Users/adi/Library/Application Support/typora-user-images/image-20240524201404417.png)
+
+
+### forward pass in our learnt convolutional layers
+
+```python
+# lets visualize the first layer on a sample image
+x = self.pool(F.relu(self.conv1(x)))
+
+# 1,6 input channel = 1 (greyscale)
+# output dimension = 6 (filterbanks)
+# kernel size = (5,5) kernels
+net.conv1 , net.conv1.weight.shape
+
+# > out: (Conv2d(1, 6, kernel_size=(5, 5), stride=(1, 1)), torch.Size([6, 1, 5, 5]))
+```
+
+
+
+<img src="/Users/adi/Library/Application Support/typora-user-images/image-20240524224750128.png" alt="image-20240524224750128" style="zoom:50%;" />
+
+```python
+import torch.nn.functional as F
+with torch.no_grad():
+    # first layer convolution
+    out1 =F.conv2d(sample_img,net.conv1.weight,
+                   bias=None, stride=1, padding=0)
+    print(out1.shape) # input channel = 1 filter banks = 6
+    
+    
+plt.imshow(
+    einops.rearrange(out1,"out_c h w -> h (out_c w)"),
+    cmap="grey"
+)
+# visualizing the output of convolution from the first learnt layer.
+# notice how some kernels are vastly different
+```
+
+![image-20240524225027213](/Users/adi/Library/Application Support/typora-user-images/image-20240524225027213.png)
+
+* we will not show the pooling operation here (check notebook) as it is not a learnable parameter
+
+```python
+with torch.no_grad():
+    # first layer convolution
+    out2 =F.conv2d(out1_p,net.conv2.weight,
+                   bias=None, stride=1, padding=0)
+    print(out2.shape) # input channel = 1 filter banks = 6
+
+plt.figure(figsize=(15,8))
+plt.imshow(
+    einops.rearrange(out2,"out_c h w -> h (out_c w)"),
+    cmap="grey"
+)
+```
+
+
+
+![image-20240524225239099](/Users/adi/Library/Application Support/typora-user-images/image-20240524225239099.png)
+
+* and then we maxpool it and then flatten it to pass to a feed forward network to arrive at the logits for classification
+
+* we only train for 10 epochs as attaining the best test accuracy is not our main goal of this report
+
+  ![image-20240524225805968](/Users/adi/Library/Application Support/typora-user-images/image-20240524225805968.png)
+
+![image-20240524225828370](/Users/adi/Library/Application Support/typora-user-images/image-20240524225828370.png)
+
+```
+Test Accuracy of Classes (Generalization scores of our Convolutional Model)
+
+Angry	: 10% 	 (54/491)
+Disgust	: 0% 	 (0/55)
+Fear	: 7% 	 (41/528)
+Happy	: 80% 	 (710/879)
+Sad	: 32% 	 (191/594)
+Surprise	: 47% 	 (197/416)
+Neutral	: 33% 	 (208/626)
+
+Test Accuracy of Dataset: 	 39% 	 (1401/3589)
+
+```
+
+
+
+
 
 
 
