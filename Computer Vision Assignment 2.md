@@ -14,6 +14,8 @@
 
 * The focus of the report would not be on attaining the best test score but would be on experimenting with different architectures.
 * And looking through how the forward pass looks in each case.
+* And we will try to reason rate of learning  whenever applicable
+* And finally we will pass in a pair of images as sampled from a video
 
 ### Convolutional Neural Network
 
@@ -23,17 +25,16 @@
 ### A simple hand made vision transformer (shallow)
 
 * we will try to replicate the paper <u>"AN IMAGE IS WORTH 16X16 WORDS: TRANSFORMERS FOR IMAGE RECOGNITION AT SCALE"</u> -- adosovitskiy et.al [https://arxiv.org/pdf/2010.11929v2] and show through one full forward pass.
-* We will try to reason the rate of learning by giving it same number of epochs as our CNN
 
 ### Pretrained Vision Transformer
 
-* we will use vit_b_16 [https://pytorch.org/vision/main/models/generated/torchvision.models.vit_b_16.html#vit-b-16] and unfreeze the last few layers to perform the training.
-
-* And compare the rate of learning with shallow transformer by giving it the same number of epochs.
+* we will use vit_b_16 [https://pytorch.org/vision/main/models/generated/torchvision.models.vit_b_16.html#vit-b-16] and unfreeze the last few layers and attention heads to perform transfer learning.
 
   
 
-## Dataset
+  
+
+## FER2013 Dataset
 
 >The dataset comprises **48x48** pixel grayscale images of faces. These faces have been automatically aligned to ensure that each face is roughly centered and occupies a similar amount of space in every image.
 >
@@ -45,17 +46,31 @@
 
 Class Diftribtion in FER2013, and the challenges asscociated with the dataset are :
 
->  The FER2013 dataset has several inherent issues that make it challenging for deep learning architectures to achieve optimal results. Key problems include imbalanced data, intra-class variation, and occlusion. Specifically, the database exhibits significant imbalance in the training data, with classes having vastly different numbers of samples. For example, the 'happy' emotion has over 13,000 samples, whereas 'disgust' has only about 600 samples, as shown in the figure above.
+>  The FER2013 dataset has several inherent issues that make it challenging for deep learning architectures to achieve optimal results. Key problems include ==imbalanced data,== intra-class variation, and occlusion. Specifically, the dataset exhibits significant imbalance in the training data, with classes having vastly different numbers of samples. For example, the 'happy' emotion has over 13,000 samples, whereas 'disgust' has only about 600 samples, as shown in the figure above.
 >
 > Intra-class variation refers to the differences within the same class. Reducing intra-class variation while increasing inter-class variation is crucial for effective classification. Variations, uncontrolled lighting conditions, and occlusions are common issues that face recognition systems encounter in real-world applications . These challenges often lead to a drop in accuracy compared to performance in controlled experimental settings. Occlusion occurs when an object blocks part of a person's face, such as a hand, hair, cap, or sunglasses. Although occlusion complicates face recognition, it can also provide useful information, as people often use their hands while communicating through gestures.
 >
-> ​	-- https://www.oaepublish.com/articles/ir.2021.16
+> ​		-- https://www.oaepublish.com/articles/ir.2021.16
 
 
 
 ## CNN
 
 * All the experiments and the code are from the notebook : https://github.com/adishourya/VIT_FER2013/blob/main/convolutional.ipynb
+* Basic Augmentations applied: horizontal and vertical fliiping for our model to become invariant to geometrical transformations.
+* We dont use any adjustment sharpness ; because we saw it made the lips and the expression overly smooth to discern emotion.
+
+```python
+self.transforms = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.RandomVerticalFlip(p=0.5),
+                # transforms.RandomAdjustSharpness(sharpness_factor=2), # makes lips look worse and it performs slightly worse with it
+                transforms.Resize((32,32), antialias=True)]) # limit number of patches (4) calculation.. keep this a multiple of 16*16
+
+```
+
+* A simple neural network from the documentaion in pytorch.
 
 ```python
 # define a small convolutional network
@@ -440,8 +455,18 @@ Test Accuracy of Dataset: 	 26% 	 (968/3589)
 ```
 
 * Note how the accuracy of a shallow transformer (significantly higher number of parameters compared to CNN) produces worse result. which is to be expected.
+* This looks like its improving but even after 10 epochs the model is still confidently wrong.
 
-  
+```python
+# if we were to assume the model is predicting randomly from a uniform distribution
+# i.e logits were rougly equal for all classes, then the loss would have been :
+-1 * np.log(1/7) # which is 1.946. which is still lower than what we have after 10 epochs!
+```
+
+* note how other models (both cnn and pre-trained vit) already has a loss score of < 1.946 after first epoch.
+* This implies that the model was not initalized well , and since the model plateaus around the half way . it also indicates that the model does not have enough representational capacity.
+
+
 
 ## Pretrained Vision Transformer (perform transfer learning)
 
@@ -489,7 +514,9 @@ for p in vision_transformer.heads.parameters():
 
 
 
-![image-20240524201609270](/Users/adi/Library/Application Support/typora-user-images/image-20240524201609270.png
+
+
+
 
 ```
 ## Results for each class
@@ -505,6 +532,50 @@ Test Accuracy of Dataset: 	 50% 	 (1799/3589)
 
 * Note how its considerably better than shallow transformer that we made
 * It also performs better than our small convolutional network (Note that the CNN has extremely lower number of parameters compared to vit_b16 )
+
+
+
+## Testing on images sampled from a real video
+
+![image-20240526123537081](/Users/adi/Library/Application Support/typora-user-images/image-20240526123537081.png)
+
+* transform the image as expected by the model
+
+```python
+# convert to grey scale
+our_img= einops.reduce(our_img,"h w c -> h w","min")
+
+# crop image into batch size of 2
+# 2 batches
+ims = einops.rearrange(our_img," h (p w) -> p h w",p=2)
+
+# resize to the same shape as the training data and unsquueze the channel dimension
+ims=  transforms.Resize((32,32), antialias=True)(ims)
+ims = einops.rearrange(ims,"b h w -> b 1 h w")
+
+# forward pass through our network.
+with torch.no_grad():
+    logits = net(ims)# logits
+    print("logits",logits)
+    probs = torch.softmax(logits,dim=1)
+    print("probs",probs)
+    print(torch.argmax(probs,dim=1))
+```
+
+```
+logits tensor([[   8.8504, -107.3212,   49.5044,  -21.4002,  -39.1525,   90.2567,
+          -52.2730],
+        [  25.8041, -122.4651,   48.1215,  -10.1948,  -35.4007,   67.4436,
+          -51.2039]])
+probs tensor([[4.4226e-36, 0.0000e+00, 2.0023e-18, 0.0000e+00, 0.0000e+00, 1.0000e+00,
+         0.0000e+00],
+        [8.2455e-19, 0.0000e+00, 4.0601e-09, 1.9146e-34, 2.8026e-45, 1.0000e+00,
+         0.0000e+00]])
+tensor([5, 5])
+
+classes[5] -> "surprise" # they were both classified as surprise.
+# which is only partially correct . correct for the second image
+```
 
 
 
@@ -555,8 +626,12 @@ py_sa = nn.functional.scaled_dot_product_attention(query, key, value)
 
 ```
 
-### importance of class tokens ?
-
-
+### importance of class tokens ?	
 
 ![image-20240525002329076](/Users/adi/Library/Application Support/typora-user-images/image-20240525002329076.png)
+
+## Refernces
+
+* Dataset used for experiment : FER 2013[https://www.kaggle.com/datasets/msambare/fer2013]
+* Tried to reproduce the paper :  <u>"AN IMAGE IS WORTH 16X16 WORDS: TRANSFORMERS FOR IMAGE RECOGNITION AT SCALE"</u> -- adosovitskiy et.al [https://arxiv.org/pdf/2010.11929v2
+* Performed Transfer learning with :  vit_b_16 [https://pytorch.org/vision/main/models/generated/torchvision.models.vit_b_16.html#vit-b-16] 
