@@ -56,7 +56,7 @@ Class Diftribtion in FER2013, and the challenges asscociated with the dataset ar
 
 ## CNN
 
-* All the experiments and the code are from the notebook : https://github.com/adishourya/VIT_FER2013/blob/main/convolutional.ipynb
+* All the experiments and the code are from the notebook : https://github.com/adishourya/VIT_FER2013/blob/main/convolutional_augmentation.ipynb
 * Basic Augmentations applied: horizontal and vertical fliiping for our model to become invariant to geometrical transformations.
 * We dont use any adjustment sharpness ; because we saw it made the lips and the expression overly smooth to discern emotion.
 
@@ -103,7 +103,7 @@ class Net(nn.Module):
 net = Net()
 ```
 
-
+* we choose commonly used 5,5 filters in our case. with padding of 0 and stride of 1.
 
 ### forward pass in our learnt convolutional layers
 
@@ -194,6 +194,7 @@ Test Accuracy of Dataset: 	 39% 	 (1401/3589)
 ## Shallow Transformer
 
 * we will try to replicate a shallow vit from the paper  adosovitskiy et.al [https://arxiv.org/pdf/2010.11929v2] 
+* `AN IMAGE IS WORTH 16X16 WORDS: TRANSFORMERS FOR IMAGE RECOGNITION AT SCALE`
 
 <img src="/Users/adi/Library/Application Support/typora-user-images/image-20240524191905674.png" alt="image-20240524191905674" style="zoom:100%;" />
 
@@ -233,7 +234,7 @@ Test Accuracy of Dataset: 	 39% 	 (1401/3589)
 
 ```python
 # initalize a lookup table
- self.C = nn.Parameter(torch.randn(self.vocab_size, self.n_embed) * 1/torch.sqrt(self.vocab_size) )
+ self.C = nn.Parameter(torch.randn(16*16, self.n_embed) * 1/torch.sqrt(256) )
   
 # flatten the patches
 patches = einops.rearrange(X,"b p h w -> b p (h w)")
@@ -248,7 +249,7 @@ emb = patches @ self.C # B , p_num , n_embed
 
 ### class token
 
-* we dont actually use the class token in our implemented model. check screenshot of the issue : `` Is the extra class embedding important to predict the results, why not simply use feature maps to predict?`
+* we dont actually use the class token in our implemented model. check screenshot of the issue : `` Is the extra class embedding important to predict the results, why not simply use feature maps to predict?` in the appendix.
 * But the pretrained models implement them anyway. So we do it like :
 
 ```python
@@ -455,7 +456,7 @@ Test Accuracy of Dataset: 	 26% 	 (968/3589)
 ```
 
 * Note how the accuracy of a shallow transformer (significantly higher number of parameters compared to CNN) produces worse result. which is to be expected.
-* This looks like its improving but even after 10 epochs the model is still confidently wrong.
+* This looks like its improving but even after 10 epochs the model is still ==confidently wrong.==
 
 ```python
 # if we were to assume the model is predicting randomly from a uniform distribution
@@ -464,7 +465,7 @@ Test Accuracy of Dataset: 	 26% 	 (968/3589)
 ```
 
 * note how other models (both cnn and pre-trained vit) already has a loss score of < 1.946 after first epoch.
-* This implies that the model was not initalized well , and since the model plateaus around the half way . it also indicates that the model does not have enough representational capacity.
+* This implies that the ==model was not initalized well== , and since the model plateaus around the half way . it also indicates that the model ==does not have enough representational capacity.==
 
 
 
@@ -537,6 +538,8 @@ Test Accuracy of Dataset: 	 50% 	 (1799/3589)
 
 ## Testing on images sampled from a real video
 
+* we test the images on our CNN model.
+
 ![image-20240526123537081](/Users/adi/Library/Application Support/typora-user-images/image-20240526123537081.png)
 
 * transform the image as expected by the model
@@ -583,12 +586,20 @@ classes[5] -> "surprise" # they were both classified as surprise.
 
 ## Remarks
 
-* Discuss nuber of parameters 
+* Number of parameters:
+
+  * CNN uses significantly lower number of parameters because of the inherent nature of parameter sharing in convolutional neural network. And performs comparably to a vision transformer ==that's not been trained for a lot of epochs.==
+  * when given enough scale , attention blocks could start learing context like the structural pattern as the filter banks do in convolutional networks.
+
 * Discuss difficulty of task at hand
 
+  * The user should use a simple convolutional network when given a task with less sample size.
 
+  * > Transformers lack some of the inductive biases inherent to CNNs, such as translation equivariance and locality, and therefore do not generalize well when trained on insufficient amounts of data. -- adosovitskiy et.al
 
-
+    > However, the picture changes if the models are trained on larger datasets ==(14M-300M images).== We find that large scale training trumps inductive bias. Our Vision Transformer (ViT) attains excellent results when pre-trained at sufficient scale and transferred to tasks with fewer datapoints. When pre-trained on the public ImageNet-21k dataset or the in-house JFT-300M dataset, ViT approaches or beats state of the art on multiple image recognition benchmarks.
+    >
+    > ​	-- - adosovitskiy et.al
 
 
 
@@ -628,10 +639,14 @@ py_sa = nn.functional.scaled_dot_product_attention(query, key, value)
 
 ### importance of class tokens ?	
 
+Track issue at : https://github.com/google-research/vision_transformer/issues/61
+
 ![image-20240525002329076](/Users/adi/Library/Application Support/typora-user-images/image-20240525002329076.png)
+
+* convolutional network without augmentation (which performs better ) is at : https://github.com/adishourya/VIT_FER2013/blob/main/convolutional.ipynb
 
 ## Refernces
 
 * Dataset used for experiment : FER 2013[https://www.kaggle.com/datasets/msambare/fer2013]
-* Tried to reproduce the paper :  <u>"AN IMAGE IS WORTH 16X16 WORDS: TRANSFORMERS FOR IMAGE RECOGNITION AT SCALE"</u> -- adosovitskiy et.al [https://arxiv.org/pdf/2010.11929v2
+* Tried to reproduce the paper :  `AN IMAGE IS WORTH 16X16 WORDS: TRANSFORMERS FOR IMAGE RECOGNITION AT SCALE` -- adosovitskiy et.al [https://arxiv.org/pdf/2010.11929v2
 * Performed Transfer learning with :  vit_b_16 [https://pytorch.org/vision/main/models/generated/torchvision.models.vit_b_16.html#vit-b-16] 
