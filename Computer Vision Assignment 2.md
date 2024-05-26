@@ -4,7 +4,7 @@
 >
 >  - Aditya Shourya (i6353515)
 >
->  - Ashkan Karimi Saberi (i6365010)
+>  - Ashkan Karimi Saber (i6365010)
 >
 >    code at : https://github.com/adishourya/vit_fer2013
 
